@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slab Label App - SimplyDoors</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    </script>
+
+    <style>
+        /* --- 1. GLOBAL & LAYOUT --- */
+        :root { --primary: #0056b3; --bg: #525659; --panel: #f0f0f0; }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg); height: 100vh; overflow: hidden; }
+
+        .app-container { display: flex; height: 100%; width: 100%; }
+
+        /* LEFT PANE: PDF Viewer */
+        .left-pane { 
+            width: 45%; 
+            border-right: 1px solid #333; 
+            background: var(--bg); 
+            display: flex; 
+            flex-direction: column; 
+            overflow-y: auto; 
+            align-items: center; 
+            padding: 20px; 
+        }
+        .pdf-canvas { box-shadow: 0 4px 10px rgba(0,0,0,0.5); margin-bottom: 20px; max-width: 100%; }
+        .instruction-box { color: #ccc; text-align: center; margin-top: 100px; border: 2px dashed #777; padding: 40px; border-radius: 10px; }
+
+        /* RIGHT PANE: Controls & Preview */
+        .right-pane { 
+            width: 55%; 
+            background: var(--panel); 
+            padding: 20px; 
+            overflow-y: auto; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+        }
+
+        /* --- 2. CONTROLS SECTION --- */
+        .control-panel {
+            background: white; padding: 20px; border-radius: 8px;
+            margin-bottom: 25px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            width: 100%; max-width: 500px;
+        }
+
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .panel-title { margin: 0; font-size: 18px; color: #333; font-weight: 700; }
+        
+        .btn-reset { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; padding: 5px 10px; font-size: 11px; border-radius: 4px; cursor: pointer; }
+        .btn-reset:hover { background: #fecaca; }
+
+        .btn-print { background: var(--primary); color: white; border: none; padding: 12px; font-weight: bold; cursor: pointer; width: 100%; border-radius: 4px; font-size: 16px; margin-top: 10px; }
+        .btn-print:hover { background: #004494; }
+
+        .btn-add { background: #eee; border: 1px solid #ccc; width: 100%; padding: 8px; margin-bottom: 10px; cursor: pointer; font-size: 12px; border-radius: 4px; }
+        .btn-add:hover { background: #ddd; }
+
+        /* Input Groups */
+        .input-group { margin-bottom: 8px; }
+        .input-label { display: block; font-size: 11px; font-weight: bold; color: #555; margin-bottom: 3px; }
+        input[type="text"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+        input[type="text"]:focus { border-color: var(--primary); outline: none; }
+        
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+        /* --- 3. LABEL CARD (PREVIEW) --- */
+        /* Screen view is slightly larger for readability, scaled down by CSS logic if needed */
+        .label-card-preview {
+            width: 4in; height: 1.25in;
+            background: white; border: 1px solid #ccc;
+            margin-bottom: 10px; padding: 0.08in;
+            display: flex; flex-direction: column;
+            position: relative; flex-shrink: 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* Delete Button (X) */
+        .delete-icon {
+            position: absolute; right: -25px; top: 50%; transform: translateY(-50%);
+            color: #d32f2f; cursor: pointer; font-weight: bold; font-size: 20px;
+            padding: 5px; opacity: 0.5;
+        }
+        .delete-icon:hover { opacity: 1; }
+
+        /* LABEL INTERNAL LAYOUT */
+        .label-header { border-bottom: 1px solid #000; padding-bottom: 2px; margin-bottom: 1px; display: flex; flex-direction: column; }
+        .header-main { font-size: 10pt; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+        .header-sub { display: flex; justify-content: space-between; font-size: 7.5pt; font-weight: normal; margin-top: 1px; color: #000; }
+        
+        .label-body { flex-grow: 1; display: flex; align-items: center; overflow: hidden; padding: 1px 0; }
+        .label-text { font-size: 11pt; font-weight: 700; line-height: 1.1em; width: 100%; word-wrap: break-word; }
+
+        .label-footer { font-size: 8pt; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px dotted #ccc; padding-top: 2px; }
+        .counter-badge { background: #000; color: #fff; padding: 1px 5px; border-radius: 2px; font-weight: bold; font-size: 8pt; }
+
+        /* Editable Inputs inside Label */
+        .edit-input { border: none; border-bottom: 1px dashed #bbb; background: transparent; width: 100%; font: inherit; color: inherit; padding: 0; margin: 0; }
+        .edit-input:focus { outline: none; border-bottom: 1px solid #000; background: #fdfdfd; }
+        .qty-wrapper { display: flex; align-items: center; font-size: 8pt; }
+        .qty-input { width: 35px; border: 1px solid #ccc; text-align: center; margin-left: 5px; padding: 1px; }
+
+        /* --- 4. PRINT SETTINGS (CRITICAL) --- */
+        @media print {
+            @page { size: 4in 1.25in; margin: 0; } /* Force Label Size */
+            body { background: white; margin: 0; padding: 0; overflow: visible; }
+            .app-container { display: none !important; } /* Hide UI */
+            .print-container { display: block !important; } /* Show Print Labels */
+            
+            .print-card {
+                width: 4in; height: 1.25in;
+                page-break-after: always; /* Force cut */
+                break-inside: avoid;
+                position: relative;
+                padding: 0.08in;
+                display: flex; flex-direction: column;
+                overflow: hidden;
+            }
+        }
+        .print-container { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <div class="left-pane" id="pdfContainer">
+            <div class="instruction-box">
+                <h3>1. Upload PDF</h3>
+                <p>Drag & Drop your SimplyDoors PDF here<br>or click "Choose File" on the right.</p>
+            </div>
+        </div>
+
+        <div class="right-pane">
+            <div class="control-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Slab Labeler</h2>
+                    <button onclick="resetApp()" class="btn-reset">Reset All</button>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">Upload Slab PDF</label>
+                    <input type="file" id="pdfInput" accept=".pdf">
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">Customer Name</label>
+                    <input type="text" id="custIn" placeholder="Scan PDF to auto-fill">
+                </div>
+
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label class="input-label">Production Job #</label>
+                        <input type="text" id="prodIn" placeholder="Auto-fill">
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Sales Ticket</label>
+                        <input type="text" id="salesIn" placeholder="Auto-fill">
+                    </div>
+                </div>
+
+                <div id="status" style="color:var(--primary); font-size:12px; font-weight:bold; margin: 10px 0; min-height:16px;"></div>
+
+                <button onclick="addManualRow()" class="btn-add">+ Add Blank Label</button>
+                <button onclick="handlePrint()" class="btn-print">PRINT LABELS</button>
+            </div>
+
+            <div style="width:100%; max-width:4in; text-align:left; margin-bottom:5px; font-size:12px; font-weight:bold; color:#666;">PREVIEW & EDIT:</div>
+            <div id="previewContainer"></div>
+        </div>
+    </div>
+
+    <div id="printContainer" class="print-container"></div>
+
+    <script>
+        // --- 1. STATE MANAGEMENT ---
+        let items = [];
+        const UI = {
+            pdfIn: document.getElementById('pdfInput'),
+            pdfBox: document.getElementById('pdfContainer'),
+            previewBox: document.getElementById('previewContainer'),
+            printBox: document.getElementById('printContainer'),
+            custIn: document.getElementById('custIn'),
+            prodIn: document.getElementById('prodIn'),
+            salesIn: document.getElementById('salesIn'),
+            status: document.getElementById('status')
+        };
+
+        // --- 2. CORE LOGIC: PDF PARSING ---
+        UI.pdfIn.addEventListener('change', async (e) => {
+            if (!e.target.files[0]) return;
+            UI.status.innerText = "Scanning PDF...";
+            
+            try {
+                // Load PDF
+                const fileData = await e.target.files[0].arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({data: fileData}).promise;
+
+                // Render PDF to Left Pane (Visual Reference)
+                UI.pdfBox.innerHTML = '';
+                for(let i=1; i<=pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const viewport = page.getViewport({scale: 1.2}); // Zoomed in slightly
+                    const canvas = document.createElement('canvas');
+                    canvas.className = 'pdf-canvas';
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+                    UI.pdfBox.appendChild(canvas);
+                }
+
+                // Parse Text
+                items = []; // Clear old items
+                for(let i=1; i<=pdf.numPages; i++) await parsePage(pdf, i);
+
+                UI.status.innerText = `Success! Found ${items.length} slab items.`;
+                renderPreview();
+
+            } catch (err) {
+                console.error(err);
+                UI.status.innerText = "Error reading PDF. See console.";
+            }
+        });
+
+        async function parsePage(pdf, pageNum) {
+            const page = await pdf.getPage(pageNum);
+            const content = await page.getTextContent();
+            
+            // 1. Sort items by Y (top to bottom), then X (left to right)
+            const rawItems = content.items.map(i => ({ 
+                str: i.str, 
+                y: Math.round(i.transform[5]), // Rounding helps group imperfect alignments
+                x: Math.round(i.transform[4]) 
+            })).sort((a,b) => b.y - a.y || a.x - b.x);
+
+            // 2. Group into lines based on Y proximity
+            let lines = [];
+            let currentLine = [];
+            let lastY = null;
+
+            rawItems.forEach(item => {
+                if (item.y < 50 || item.y > 800) return; // Ignore very top/bottom page artifacts
+
+                if (lastY === null || Math.abs(item.y - lastY) < 6) {
+                    currentLine.push(item);
+                } else {
+                    lines.push(currentLine);
+                    currentLine = [item];
+                }
+                lastY = item.y;
+            });
+            if(currentLine.length) lines.push(currentLine);
+
+            // 3. Analyze Lines
+            lines.forEach(lineObjs => {
+                // Re-sort line specifically by X to read left-to-right correctly
+                lineObjs.sort((a,b) => a.x - b.x);
+                const fullText = lineObjs.map(o => o.str).join(" ").trim();
+
+                // HEADER DETECTION (Customer, Job#, Ticket)
+                if (fullText.match(/Production Job#:/i)) {
+                    // Extract Prod#
+                    const prod = fullText.match(/Production Job#:\s*(\d+)/i);
+                    if(prod && !UI.prodIn.value) UI.prodIn.value = prod[1];
+
+                    // Extract Customer (Between "Customer:" and "Job#")
+                    const cust = fullText.match(/Customer:\s*(.*?)(Job#|$)/i);
+                    if(cust && !UI.custIn.value) UI.custIn.value = cust[1].trim();
+
+                    // Extract Sales Ticket (The second Job#)
+                    const sales = fullText.match(/Customer:.*?Job#:\s*(\d+)/i);
+                    if(sales && !UI.salesIn.value) UI.salesIn.value = sales[1];
+                    return; // Done with this line
+                }
+
+                // ITEM DETECTION (Looking for slab keywords or dimensions)
+                // Filter: Must contain a size (4 digits) OR keywords "Primed","Shaker","Solid"
+                if (fullText.match(/(\d{4}|Primed|Shaker|Solid|Glass|Panel)/i)) {
+                    // Anti-Filter: Ignore addresses, dates, or headers that look like items
+                    if (fullText.match(/Location Address|Job Date|Drive|Lane|Road|Rd\.|St\.|Blvd|Ave/i)) return;
+
+                    // Parse Qty (Look for number at end of line)
+                    let qty = 1;
+                    let desc = fullText;
+                    const qtyMatch = fullText.match(/(\d+(\.\d{1,2})?)\s*$/);
+                    
+                    if (qtyMatch) {
+                        qty = Math.ceil(parseFloat(qtyMatch[1])); // Force integer
+                        // Remove Qty from description
+                        desc = fullText.substring(0, fullText.lastIndexOf(qtyMatch[0])).trim();
+                    }
+                    
+                    // Cleanup trailing punctuation
+                    desc = desc.replace(/['",]+$/, '').trim();
+
+                    if(desc.length > 3) {
+                        items.push({ id: Date.now() + Math.random(), desc, qty });
+                    }
+                }
+            });
+        }
+
+        // --- 3. RENDERING (PREVIEW & PRINT) ---
+
+        // Helper: Generate HTML for a single label
+        function createLabelHTML(data, type, index, subIndex, totalSub) {
+            // type = 'preview' (editable inputs) or 'print' (static text)
+            const isPreview = type === 'preview';
+            
+            // Header Values
+            const cust = UI.custIn.value || "CUSTOMER NAME";
+            const prod = UI.prodIn.value || "";
+            const sales = UI.salesIn.value || "";
+
+            const descContent = isPreview 
+                ? `<input class="edit-input" value="${data.desc.replace(/"/g, '&quot;')}" oninput="updateItem(${index}, 'desc', this.value)">`
+                : `<span id="text-${index}-${subIndex}">${data.desc}</span>`;
+
+            const qtyContent = isPreview
+                ? `<div class="qty-wrapper">Qty: <input class="qty-input" type="number" min="1" value="${data.qty}" onchange="updateItem(${index}, 'qty', this.value)"></div>`
+                : `<span style="font-weight:bold; font-size:8pt">SimplyDoors</span>`; // Static footer in print
+
+            const counterContent = isPreview
+                ? `Total: ${data.qty}`
+                : `${subIndex} of ${totalSub}`;
+
+            return `
+                <div class="label-header">
+                    <div class="header-main">${cust}</div>
+                    <div class="header-sub">
+                        <span>Prod: ${prod}</span>
+                        <span>Sales: ${sales}</span>
+                    </div>
+                </div>
+                <div class="label-body" id="body-${index}-${subIndex}">
+                    <div class="label-text">
+                        ${descContent}
+                    </div>
+                </div>
+                <div class="label-footer">
+                    ${qtyContent}
+                    <div class="counter-badge">${counterContent}</div>
+                </div>
+            `;
+        }
+
+        function renderPreview() {
+            UI.previewBox.innerHTML = '';
+            items.forEach((item, idx) => {
+                const wrapper = document.createElement('div');
+                wrapper.style.position = 'relative'; // For positioning the Delete X
+
+                const card = document.createElement('div');
+                card.className = 'label-card-preview';
+                card.innerHTML = createLabelHTML(item, 'preview', idx, 1, 1);
+                
+                // Add Delete Button
+                const delBtn = document.createElement('div');
+                delBtn.className = 'delete-icon';
+                delBtn.innerHTML = '&#10005;'; // X symbol
+                delBtn.onclick = () => removeItem(idx);
+
+                wrapper.appendChild(card);
+                wrapper.appendChild(delBtn);
+                UI.previewBox.appendChild(wrapper);
+            });
+        }
+
+        function handlePrint() {
+            UI.printBox.innerHTML = '';
+            
+            // Loop through items and expand based on QTY
+            items.forEach((item, idx) => {
+                const count = parseInt(item.qty) || 1;
+                for(let c = 1; c <= count; c++) {
+                    const div = document.createElement('div');
+                    div.className = 'print-card';
+                    div.innerHTML = createLabelHTML(item, 'print', idx, c, count);
+                    UI.printBox.appendChild(div);
+                    
+                    // Trigger Font Resizing (Shrink to Fit)
+                    setTimeout(() => fitText(idx, c), 0);
+                }
+            });
+
+            // Delay print dialog slightly to allow DOM paint & resize
+            setTimeout(() => window.print(), 500);
+        }
+
+        // --- 4. UTILITIES (Shrink Text, Update, Reset) ---
+        
+        function fitText(idx, subIndex) {
+            const body = document.getElementById(`body-${idx}-${subIndex}`);
+            const text = document.getElementById(`text-${idx}-${subIndex}`);
+            if(!body || !text) return;
+
+            let size = 16; // Start font size (pt)
+            text.style.fontSize = size + 'pt';
+
+            // Shrink loop
+            while( (body.scrollHeight > body.clientHeight || body.scrollWidth > body.clientWidth) && size > 6) {
+                size -= 0.5;
+                text.style.fontSize = size + 'pt';
+            }
+        }
+
+        window.updateItem = (idx, key, val) => {
+            items[idx][key] = val;
+            // No re-render needed for text inputs to keep focus, 
+            // but if Qty changes, we might want to update the "Total" badge visual if strictly needed.
+        };
+
+        window.removeItem = (idx) => {
+            items.splice(idx, 1);
+            renderPreview();
+        };
+
+        window.addManualRow = () => {
+            items.push({ id: Date.now(), desc: "New Slab Description", qty: 1 });
+            renderPreview();
+        };
+
+        window.resetApp = () => {
+            if(!confirm("Clear everything?")) return;
+            items = [];
+            UI.pdfIn.value = '';
+            UI.custIn.value = '';
+            UI.prodIn.value = '';
+            UI.salesIn.value = '';
+            UI.pdfBox.innerHTML = '<div class="instruction-box"><h3>1. Upload PDF</h3><p>Drag & Drop your SimplyDoors PDF here</p></div>';
+            UI.status.innerText = '';
+            renderPreview();
+        };
+
+        // Listen for global header updates to re-render preview (so user sees changes immediately)
+        [UI.custIn, UI.prodIn, UI.salesIn].forEach(el => {
+            el.addEventListener('input', renderPreview);
+        });
+
+    </script>
+</body>
+</html>
